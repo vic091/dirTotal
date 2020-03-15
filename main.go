@@ -15,9 +15,9 @@ func init() {
 	flag.Parse()
 }
 
+// go run main.go -p /Users/admin/www/learn/go/src/dir/
 func main() {
 	//path = "/Users/admin/www/learn/go/src/dir/"
-	fmt.Println(path)
 	server := &http.Server{
 		Handler: route.MyHandler{
 			RootPath: path,
