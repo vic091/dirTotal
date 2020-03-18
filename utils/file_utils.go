@@ -1,9 +1,13 @@
 package utils
 
 import (
-	"fmt"
+	"dirTotal/config"
+	"encoding/json"
+	"io/ioutil"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -12,15 +16,9 @@ var (
 	limitChan       = make(chan struct{}, MAX_CONCURRENCY)
 )
 
-type DirTotal struct {
-	DirCount  int   `json:"dirCount"`
-	FileCount int   `json:"fileCount"`
-	TotalSize int64 `json:"totalSize"`
-}
-
 // 获取所有子目录数量
-func GetDirInfo(path string) (dirTotal DirTotal, err error) {
-	ch := make(chan DirTotal, 5)
+func GetDirInfo(path string) (dirTotal config.DirTotal, err error) {
+	ch := make(chan config.DirTotal, 5)
 	chErr := make(chan error, 5)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -52,7 +50,7 @@ Loop:
 	return
 }
 
-func ListDirInfo(path string, wg *sync.WaitGroup, ch chan DirTotal, chErr chan error) {
+func ListDirInfo(path string, wg *sync.WaitGroup, ch chan config.DirTotal, chErr chan error) {
 	f, err := os.OpenFile(path, os.O_RDONLY, os.ModeDir)
 	if err != nil {
 		chErr <- err
@@ -71,7 +69,7 @@ func ListDirInfo(path string, wg *sync.WaitGroup, ch chan DirTotal, chErr chan e
 		}
 
 		if fi.IsDir() {
-			d := DirTotal{
+			d := config.DirTotal{
 				DirCount:  1,
 				FileCount: 0,
 				TotalSize: 0,
@@ -79,7 +77,7 @@ func ListDirInfo(path string, wg *sync.WaitGroup, ch chan DirTotal, chErr chan e
 			ch <- d
 			dirs = append(dirs, filepath.Join(path, fi.Name()))
 		} else {
-			d := DirTotal{
+			d := config.DirTotal{
 				DirCount:  0,
 				FileCount: 1,
 				TotalSize: fi.Size(),
@@ -95,17 +93,90 @@ func ListDirInfo(path string, wg *sync.WaitGroup, ch chan DirTotal, chErr chan e
 	}
 }
 
-type Dirs struct {
-	Name  string `json:"name"`
-	IsDir bool   `json:"isDir"`
-	Size  int64  `json:"size"`
+// 获取所有子目录数量
+func GetHttpDirInfo(path string) (dirTotal config.DirTotal, err error) {
+	ch := make(chan config.DirTotal, 5)
+	chErr := make(chan error, 5)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go ListHttpDirInfo(path, &wg, ch, chErr)
+	go func() {
+		wg.Wait()
+		close(ch)
+		close(chErr)
+	}()
+	var ok bool
+Loop:
+	for {
+		select {
+		case d, ok := <-ch:
+			if ok {
+				dirTotal.TotalSize += d.TotalSize
+				dirTotal.DirCount += d.DirCount
+				dirTotal.FileCount += d.FileCount
+			} else {
+				break Loop
+			}
+		case err, ok = <-chErr:
+			if ok {
+				break Loop
+			}
+		}
+	}
+
+	return
+}
+
+func ListHttpDirInfo(path string, wg *sync.WaitGroup, ch chan config.DirTotal, chErr chan error) {
+	resp, err := http.Get(config.HOST_IP + "dir?path=" + path)
+	if err != nil {
+		chErr <- err
+		return
+	}
+
+	defer resp.Body.Close()
+	defer wg.Done()
+	body, _ := ioutil.ReadAll(resp.Body)
+	resDirs := config.ResDirs{}
+	err = json.Unmarshal(body, &resDirs)
+	if err != nil {
+		chErr <- err
+		return
+	}
+	dirs := make([]string, 0)
+
+	for _, v := range resDirs.Dirs {
+		if v.IsDir {
+			d := config.DirTotal{
+				DirCount:  1,
+				FileCount: 0,
+				TotalSize: 0,
+			}
+			ch <- d
+			name := strings.Replace(v.Name, *config.RootPath, "", 0)
+			dirs = append(dirs, name)
+		} else {
+			d := config.DirTotal{
+				DirCount:  0,
+				FileCount: 1,
+				TotalSize: v.Size,
+			}
+			ch <- d
+		}
+	}
+
+	for _, fi := range dirs {
+		wg.Add(1)
+		limitChan <- struct{}{}
+		go ListDirInfo(fi, wg, ch, chErr)
+		<-limitChan
+	}
 }
 
 // 获取目录信息
-func DirInfo(path string) (dirInfo []Dirs, err error) {
+func DirInfo(path string) (dirInfo []config.Dirs, err error) {
 	f, err := os.OpenFile(path, os.O_RDONLY, os.ModeDir)
 	if err != nil {
-		fmt.Println(err.Error())
 		return nil, err
 	}
 	defer f.Close()
@@ -113,15 +184,15 @@ func DirInfo(path string) (dirInfo []Dirs, err error) {
 	//操作系统指定的路径分隔符
 	separator := string(os.PathSeparator)
 	for _, info := range fileInfo {
-		dir := Dirs{}
+		dir := config.Dirs{}
 		if info.IsDir() {
-			dir = Dirs{
+			dir = config.Dirs{
 				Name:  path + separator + info.Name(),
 				IsDir: true,
 				Size:  0,
 			}
 		} else {
-			dir = Dirs{
+			dir = config.Dirs{
 				Name:  path + separator + info.Name(),
 				IsDir: false,
 				Size:  info.Size(),

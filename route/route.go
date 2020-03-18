@@ -1,7 +1,7 @@
 package route
 
 import (
-	"dir/service"
+	"dirTotal/service"
 	"net/http"
 )
 
@@ -16,6 +16,9 @@ func (mh MyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if r.URL.Path == "/dir_info" {
 		p.DirInfoService(w, r)
+		return
+	} else if r.URL.Path == "/dir_http" {
+		p.DirHttpInfoService(w, r)
 		return
 	}
 

@@ -1,7 +1,8 @@
 package main
 
 import (
-	"dir/route"
+	"dirTotal/config"
+	"dirTotal/route"
 	"flag"
 	"fmt"
 	"net/http"
@@ -13,11 +14,12 @@ var path string
 func init() {
 	flag.StringVar(&path, "p", "/", "log in user")
 	flag.Parse()
+	config.RootPath = &path
 }
 
 // go run main.go -p /Users/admin/www/learn/go/src/dir/
 func main() {
-	//path = "/Users/admin/www/learn/go/src/dir/"
+	//path = "D:\\www\\python\\"
 	server := &http.Server{
 		Handler: route.MyHandler{
 			RootPath: path,
